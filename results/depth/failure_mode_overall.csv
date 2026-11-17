@@ -1,0 +1,5 @@
+split_strategy,model,n,n_actual_positive,n_actual_negative,tp,fp,fn,tn,fp_rate,fn_rate
+stratified,logistic_regression,6178,696,5482,115,49,581,5433,0.00893834367019336,0.8347701149425287
+stratified,random_forest,6178,696,5482,176,202,520,5280,0.03684786574242977,0.7471264367816092
+chronological,logistic_regression,6178,658,5520,0,0,658,5520,0.0,1.0
+chronological,random_forest,6178,658,5520,28,32,630,5488,0.005797101449275362,0.9574468085106383

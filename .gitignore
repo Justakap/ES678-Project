@@ -1,0 +1,8 @@
+.DS_Store
+**/.DS_Store
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Large trained Random Forest models (30-77MB each) - regenerate via notebooks 05/06
+results/models/*random_forest*.joblib

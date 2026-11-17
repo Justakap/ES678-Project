@@ -1,0 +1,354 @@
+\documentclass{article}
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{xcolor}
+
+% This is an ES 678 course paper, not a conference submission.
+\makeatletter
+\renewcommand{\@noticestring}{ES 678 Course Project}
+\makeatother
+
+\renewcommand{\arraystretch}{0.9}
+\setlength{\tabcolsep}{4pt}
+
+\title{When Accuracy Lies: Detecting Data Leakage in Bank Marketing Models}
+
+\author{%
+  Anant Khandelwal \\
+  Roll Number: 26210012 \\
+  ES 678 \\
+  Indian Institute of Technology Gandhinagar
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Using the UCI Bank Marketing dataset, we audit a well-known leakage source:
+\texttt{duration}, a call-length feature that cannot be known before a call
+is placed. We build a 14-feature realistic pre-contact set, excluding
+\texttt{duration} and other post-contact information, and compare a
+majority-class baseline, Logistic Regression, and Random Forest under a
+stratified random split and an approximate chronological split, with all
+model and threshold selection confined to validation data and the test set
+read only once. Re-adding \texttt{duration} as a leakage diagnostic raises
+Average Precision by up to +0.30 (validation) and +0.24 (test), confirmed by
+a paired bootstrap whose 95\% confidence intervals exclude zero. The
+chronological split further reveals substantial temporal distribution
+shift, including a markedly smaller leakage effect on its test set than on
+its validation set.
+\end{abstract}
+
+\section{Problem and Motivation}
+The UCI Bank Marketing dataset records outcomes of a Portuguese bank's
+telephone-based term-deposit campaigns \citep{moro2014data,moro2012uci}. Each
+row is a client-related campaign contact record; the same client may appear
+in more than one row if contacted multiple times, and each row's label
+(\texttt{y} = yes/no) indicates whether that specific contact resulted in a
+subscription. We study the decision a bank faces \emph{immediately before a
+scheduled customer contact begins}: predict whether that contact will result
+in a subscription, using only information available at that moment. This
+matters because the dataset also includes \texttt{duration}, the call
+length, which cannot be known before the call happens yet is strongly
+associated with the outcome (0 seconds implies \texttt{y} = no). Prior work
+recommends discarding \texttt{duration} for realistic modeling
+\citep{moro2014data}, but it is still commonly left in, an instance of the
+broader problem of target leakage \citep{kaufman2012leakage}. We ask: (1)
+how well can a pre-contact-only model predict subscription, and (2) how much
+of commonly reported performance on this dataset is a leakage artifact
+rather than genuine signal.
+
+\section{Data and Preparation}
+We use \texttt{bank-additional-full.csv} \citep{moro2014data,moro2012uci},
+41{,}188 rows and 21 raw columns spanning client attributes, prior-campaign
+history, current-campaign contact details, and five economic indicators. A
+feature-availability audit classified each column by whether its value would
+be known immediately before a scheduled contact, excluding current-call
+outcome columns (\texttt{duration}, \texttt{campaign}) and the five economic
+indicators (unverifiable at record level), and retaining client-profile fields (\texttt{age}, \texttt{job}, \texttt{marital},
+\texttt{education}, \texttt{default}, \texttt{housing}, \texttt{loan}),
+prior-campaign history (\texttt{pdays}, \texttt{previous}, \texttt{poutcome}),
+and the scheduled contact plan (\texttt{contact}, \texttt{month},
+\texttt{day\_of\_week}) -- 13 approved raw features, assumed fixed by the
+bank's outreach schedule and known before the call. The sentinel
+\texttt{pdays} = 999 (``never previously contacted'') is recoded into a
+binary \texttt{previously\_contacted} flag (1{,}515 of 41{,}188 clients) and
+\texttt{days\_since\_previous\_contact} (\texttt{NaN} where not applicable),
+yielding a final \textbf{14-feature} realistic set (4 numerical, 10
+categorical). The literal string \texttt{"unknown"} (e.g.\ \texttt{default}:
+8{,}597 rows) is kept as its own category rather than imputed, since
+nondisclosure may itself be informative. Remaining missing values use median
+or most-frequent imputation, followed by one-hot encoding with unseen
+categories ignored at inference; every imputer, encoder, and scaler is fit
+on the training split only and never refit on validation/test rows.
+
+\section{Methods}
+We compare three classifiers spanning a non-learning floor and two standard
+supervised baselines. The \textbf{majority-class baseline} predicts the
+single most frequent training-set label for every example, regardless of
+input features; its Average Precision therefore equals the positive-class
+prevalence in the evaluation set -- a concrete, threshold-free floor any
+model with genuine discriminative skill must exceed. \textbf{Logistic
+Regression} models $P(y=1 \mid \mathbf{x}) = \sigma(\mathbf{w}^\top
+\mathbf{x} + b)$, $\sigma(z) = 1/(1+e^{-z})$, fit by minimizing regularized
+log loss with numeric inputs standardized ($z=(x-\mu)/\sigma$, estimated on
+training only) and $L_2$ regularization at scikit-learn's default strength
+\citep{pedregosa2011scikit}. \textbf{Random Forest} \citep{breiman2001random}
+averages $B=100$ bootstrap-trained decision trees with random feature
+subsampling; no scaling is applied, since tree splits are scale-invariant.
+All models use \texttt{random\_state=42} and otherwise default
+hyperparameters, for an honest leakage comparison rather than a tuned
+leaderboard entry. To measure leakage directly, we additionally fit
+a second, otherwise identical, copy of each real model with \texttt{duration}
+added back as a 15th feature; these duration-inclusive models are
+\textbf{leakage diagnostics only} and are never treated as deployable.
+
+\section{Evaluation Design}
+We construct two independent 70:15:15 train/validation/test splits of the
+41{,}188 rows. The \textbf{random split} is stratified on \texttt{y}
+($\sim$11.3\% subscription rate preserved in each subset). The
+\textbf{chronological split} preserves row order and cuts positionally
+(first 70\% / next 15\% / last 15\%), giving an approximate forward-in-time
+evaluation on later records rather than an i.i.d.\ sample; its subsets are
+\emph{not} class-balanced by construction -- a temporal audit (Section 5)
+showed the subscription rate drifts substantially across the timeline.
+Preprocessing and models are fit on each split's training rows only. Because
+the target class is rare ($\sim$11\%), \textbf{Average Precision} (area
+under the precision--recall curve) is the primary metric, since accuracy and
+even ROC-AUC can be misleadingly optimistic under imbalance
+\citep{saito2015precision}; ROC-AUC, precision, recall, and F1 are secondary.
+All model and threshold selection -- including the F1-maximizing threshold
+-- uses validation data only, via a grid search over thresholds 0.05--0.95;
+thresholds are frozen before the test set is read even once.
+
+\section{Results and Error Analysis}
+Validation and test results are reported separately; they are not
+interchangeable, since class balance differs between them (notably for the
+chronological split, Table~3).
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\caption{Validation results, realistic (no-\texttt{duration}) models.}
+\begin{tabular}{llccc}
+\toprule
+Split & Model & AP & ROC-AUC & F1 \\
+\midrule
+Stratified & Baseline & 0.113 & 0.500 & 0.000 \\
+Stratified & Log.\ Reg. & 0.399 & 0.754 & 0.267 \\
+Stratified & Rand.\ Forest & 0.336 & 0.737 & 0.328 \\
+Chronological & Baseline & 0.107 & 0.500 & 0.000 \\
+Chronological & Log.\ Reg. & 0.198 & 0.657 & 0.000 \\
+Chronological & Rand.\ Forest & 0.187 & 0.612 & 0.078 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Every baseline's AP equals its split's prevalence, confirming the floor
+defined in Section 3. Both real models clearly exceed it on AP in both
+splits. Logistic Regression attains marginally higher AP than Random
+Forest, but at the default 0.5 threshold its F1 is worse or zero --
+chronological Logistic Regression predicts the negative class for every row
+(F1 = 0), despite AP (0.198) exceeding baseline, a ranking/classification
+gap discussed in Section 6.
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\caption{Test results at the frozen validation-selected threshold.}
+\begin{tabular}{llcccc}
+\toprule
+Split & Model & Prev. & AP & ROC-AUC & F1 \\
+\midrule
+Strat. & Baseline & 0.113 & 0.113 & 0.500 & 0.000 \\
+Strat. & Log.\ Reg. & 0.113 & 0.435 & 0.783 & 0.465 \\
+Strat. & Rand.\ Forest & 0.113 & 0.350 & 0.740 & 0.394 \\
+Chron. & Baseline & 0.385 & 0.385 & 0.500 & 0.000 \\
+Chron. & Log.\ Reg. & 0.385 & 0.468 & 0.605 & 0.416 \\
+Chron. & Rand.\ Forest & 0.385 & 0.462 & 0.605 & 0.489 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The chronological test prevalence (38.5\%) is far higher than its own
+validation prevalence (10.7\%): a temporal audit of 10 equal row-index
+segments showed subscription rate rising from 2.8\% to 45.9\%, with the
+largest jump (+30.2 points) falling inside the test portion. The stratified
+split shows no such shift. This is a property of row ordering, not a claim
+about the drift's cause.
+
+\textbf{Duration leakage.} Adding \texttt{duration} (diagnostics only)
+produces large, consistent gains on both validation and test:
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\caption{$\Delta$AP / $\Delta$ROC-AUC from adding \texttt{duration}.}
+\begin{tabular}{llcccc}
+\toprule
+& & \multicolumn{2}{c}{Validation} & \multicolumn{2}{c}{Test} \\
+Split & Model & $\Delta$AP & $\Delta$AUC & $\Delta$AP & $\Delta$AUC \\
+\midrule
+Strat. & Log.\ Reg. & +0.174 & +0.161 & +0.128 & +0.136 \\
+Strat. & Rand.\ Forest & +0.269 & +0.182 & +0.236 & +0.174 \\
+Chron. & Log.\ Reg. & +0.231 & +0.220 & +0.078 & +0.097 \\
+Chron. & Rand.\ Forest & +0.300 & +0.270 & +0.068 & +0.081 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Failure modes (validation, realistic models).} False-negative rates
+are high under class imbalance (74--83\% for the stratified split);
+chronological Logistic Regression has zero true positives at the default
+threshold. The most notable subgroup finding is \texttt{poutcome=success}:
+over-predicted positive on the stratified split (Random Forest
+false-positive rate 60\%), but almost entirely missed on the chronological
+split (Section 6, with counts).
+
+\section{Graduate Depth Analysis}
+\textbf{Paired bootstrap on validation.} For each split and model, we
+resampled the matched validation predictions (with- and without-
+\texttt{duration}, same rows) 1{,}000 times and recomputed $\Delta$AP on
+each resample, yielding a 95\% percentile confidence interval.
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\caption{Paired bootstrap $\Delta$AP, 95\% CI, validation only (n=6{,}178).}
+\begin{tabular}{llcc}
+\toprule
+Split & Model & Observed $\Delta$AP & 95\% CI \\
+\midrule
+Strat. & Log.\ Reg. & +0.174 & [+0.134, +0.210] \\
+Strat. & Rand.\ Forest & +0.269 & [+0.236, +0.299] \\
+Chron. & Log.\ Reg. & +0.231 & [+0.196, +0.269] \\
+Chron. & Rand.\ Forest & +0.300 & [+0.265, +0.341] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All four intervals exclude zero: the AP increase from \texttt{duration} is
+not attributable to resampling noise on validation data. This interval
+describes only validation-set sampling uncertainty; no equivalent bootstrap
+was computed on the test set, and it should not be read as a statement
+about test-set uncertainty.
+
+\textbf{Threshold sensitivity: ranking vs.\ classification.} AP and ROC-AUC
+are threshold-independent ranking metrics; precision, recall, and F1 require
+a fixed decision threshold. Sweeping validation thresholds from 0.05 to 0.95
+shows the default 0.5 is rarely optimal: chronological Random Forest's
+validation F1 rises from 0.078 (at 0.5) to 0.251 (at 0.15); chronological
+Logistic Regression rises from 0.000 to 0.274 (at 0.10). A model can
+therefore rank positives above negatives reasonably well while appearing to
+have ``learned nothing'' under an unexamined default threshold.
+
+\textbf{Chronological leakage: validation vs.\ test.} The leakage effect
+(Table 3) shrinks far more on the chronological split than the stratified
+split from validation to test: Random Forest $\Delta$AP falls from +0.300 to
++0.068, a $\sim$77\% relative drop, versus $\sim$12\% for the stratified
+split. This coincides with the chronological test set's much higher
+prevalence (Section 5) and indicates that, for this split, validation-set
+leakage magnitude is not a reliable estimate of test-set leakage magnitude
+-- an association reported without attributing a causal mechanism.
+
+\textbf{Subgroup failure findings (validation, with counts).} For
+\texttt{poutcome=success}: stratified Random Forest has a 60.0\%
+false-positive rate ($n{=}187$; 65 actual negatives, 39 false positives),
+while chronological Random Forest has a 100\% false-negative rate on the
+same category ($n{=}67$ actual positives, 67 missed, only 1 false positive).
+By \texttt{job} (subgroups $\ge$100 rows), stratified Random Forest's
+highest false-positive rate is in \texttt{student} (12.2\%, $n{=}132$) and
+\texttt{retired} (11.3\%, $n{=}237$); under the chronological split, every
+\texttt{job} subgroup shows a 100\% false-negative, 0\% false-positive rate
+for Logistic Regression, consistent with its all-negative predictions.
+
+\section{Limitations and Conclusion}
+This project's central finding is that duration-inclusive models
+substantially overstate performance relative to a realistic pre-contact
+model, on both validation and the held-out test set, confirming this
+dataset's well-documented prediction-time leakage. The chronological split
+further shows that performance and leakage do not generalize uniformly over
+time, since its test set's much higher subscription rate shrinks the
+measured leakage relative to validation and shifts the operating point. The
+dataset provides no complete timestamp or customer identifier, so the
+chronological split uses row order as an \emph{approximate} proxy for time
+rather than verified dates, and apparent temporal drift may partly reflect
+unobserved record-ordering effects. The scheduled-contact features
+(\texttt{contact}, \texttt{month}, \texttt{day\_of\_week}) are assumed known
+before the call, assuming they reflect bank-side scheduling, which the data
+cannot verify. The reported 95\% confidence intervals come from a paired
+bootstrap on \emph{validation data only}, with no equivalent interval for
+test-set leakage, reported only as a point estimate. Finally, every result
+here is a predictive association, not a causal claim about why any client
+subscribes or about the temporal shift's cause. Within these bounds, a
+meaningful share of commonly reported bank-marketing performance is a
+leakage artifact, not genuine pre-contact predictive skill.
+
+\section{Reproducibility and AI-Use Disclosure}
+\textbf{Data.} \texttt{bank-additional-full.csv}, UCI Machine Learning
+Repository, \url{https://doi.org/10.24432/C5K306} (41{,}188 rows). All
+experiments use \texttt{random\_state=42}. Two fixed 70:15:15
+train/validation/test splits (stratified random; chronological by row
+order) are saved as index files and reused unchanged. Every preprocessing
+step is fit on the training split only, and classification thresholds are
+selected on validation data before the test set is read even once. The full
+pipeline -- data audit, preprocessing, model training, leakage diagnostics,
+bootstrap analysis, and final test evaluation -- is implemented across nine
+Jupyter notebooks (\texttt{01\_data\_understanding} through
+\texttt{09\_final\_test\_evaluation}) in the project repository.
+
+\textbf{AI-use disclosure.} ChatGPT and Claude assisted with: (1)
+identifying and selecting a suitable publicly available dataset; (2)
+step-by-step project planning and workflow design; (3) writing and
+implementing code; (4) identifying and debugging coding errors; (5)
+double-checking implementation, experimental procedures, and results; and
+(6) understanding machine-learning concepts and drafting this paper's
+documentation. The author independently reviewed all code, executed every
+experiment, examined the resulting outputs, and takes full responsibility
+for the final work.
+
+\begin{thebibliography}{9}
+
+\bibitem[Moro et al.(2014)]{moro2014data}
+S.~Moro, P.~Cortez, and P.~Rita.
+\newblock A data-driven approach to predict the success of bank telemarketing.
+\newblock \emph{Decision Support Systems}, 62:22--31, 2014.
+
+\bibitem[Moro et al.(2012)]{moro2012uci}
+S.~Moro, P.~Rita, and P.~Cortez.
+\newblock Bank Marketing [Dataset].
+\newblock \emph{UCI Machine Learning Repository}, 2012.
+\newblock \url{https://doi.org/10.24432/C5K306}.
+
+\bibitem[Kaufman et al.(2012)]{kaufman2012leakage}
+S.~Kaufman, S.~Rosset, C.~Perlich, and O.~Stitelman.
+\newblock Leakage in data mining: Formulation, detection, and avoidance.
+\newblock \emph{ACM Transactions on Knowledge Discovery from Data}, 6(4):1--21, 2012.
+
+\bibitem[Breiman(2001)]{breiman2001random}
+L.~Breiman.
+\newblock Random forests.
+\newblock \emph{Machine Learning}, 45(1):5--32, 2001.
+
+\bibitem[Pedregosa et al.(2011)]{pedregosa2011scikit}
+F.~Pedregosa, G.~Varoquaux, A.~Gramfort, et al.
+\newblock Scikit-learn: Machine learning in Python.
+\newblock \emph{Journal of Machine Learning Research}, 12:2825--2830, 2011.
+
+\bibitem[Saito and Rehmsmeier(2015)]{saito2015precision}
+T.~Saito and M.~Rehmsmeier.
+\newblock The precision-recall plot is more informative than the ROC plot
+  when evaluating binary classifiers on imbalanced datasets.
+\newblock \emph{PLOS ONE}, 10(3):e0118432, 2015.
+
+\end{thebibliography}
+
+\end{document}

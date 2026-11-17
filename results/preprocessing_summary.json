@@ -1,0 +1,94 @@
+{
+  "random_state": 42,
+  "primary_features_selected": [
+    "age",
+    "job",
+    "marital",
+    "education",
+    "default",
+    "housing",
+    "loan",
+    "pdays",
+    "previous",
+    "poutcome",
+    "contact",
+    "month",
+    "day_of_week"
+  ],
+  "target": "y",
+  "pdays_recoding": {
+    "sentinel_value": 999,
+    "new_columns": [
+      "previously_contacted",
+      "days_since_previous_contact"
+    ],
+    "dropped_column": "pdays",
+    "previously_contacted_counts": {
+      "0": 39673,
+      "1": 1515
+    },
+    "days_since_previous_contact_nan_count": 39673
+  },
+  "final_feature_columns": {
+    "numerical": [
+      "age",
+      "previous",
+      "days_since_previous_contact",
+      "previously_contacted"
+    ],
+    "categorical": [
+      "job",
+      "marital",
+      "education",
+      "default",
+      "housing",
+      "loan",
+      "poutcome",
+      "contact",
+      "month",
+      "day_of_week"
+    ],
+    "total_raw_columns": 14
+  },
+  "unknown_category_counts": {
+    "job": 330,
+    "marital": 80,
+    "education": 1731,
+    "default": 8597,
+    "housing": 990,
+    "loan": 990
+  },
+  "pipelines": {
+    "random_forest": {
+      "numerical": "SimpleImputer(strategy='median')",
+      "categorical": "SimpleImputer(strategy='most_frequent') -> OneHotEncoder(handle_unknown='ignore')",
+      "scaling": "none"
+    },
+    "logistic_regression": {
+      "numerical": "SimpleImputer(strategy='median') -> StandardScaler()",
+      "categorical": "SimpleImputer(strategy='most_frequent') -> OneHotEncoder(handle_unknown='ignore')",
+      "scaling": "StandardScaler on numerical features"
+    }
+  },
+  "transformed_dimensions": {
+    "n_output_columns": 57,
+    "n_numerical": 4,
+    "n_onehot": 53
+  },
+  "unseen_category_handling_verified": true,
+  "splits": {
+    "stratified": {
+      "strategy": "random, stratified on y, random_state fixed",
+      "train_size": 28831,
+      "val_size": 6178,
+      "test_size": 6179
+    },
+    "chronological": {
+      "strategy": "original row order preserved, first 70% / next 15% / last 15%",
+      "train_size": 28831,
+      "val_size": 6178,
+      "test_size": 6179
+    }
+  },
+  "fit_on_training_only": true
+}
